@@ -73,11 +73,11 @@ const ProblemPage = () => {
         setStatus(data.status);
         setExecutionTime(data.executionTimeMs);
         setMemoryUsage(Math.round(data.memoryUsedKb / 1024));
-        // Map the test results
+        // Map the test results - convert testCaseId from number to string
         setResults(data.testResults.map(r => ({
-          testCaseId: r.testCaseId,
+          testCaseId: String(r.testCaseId),
           passed: r.passed,
-          output: r.output || '',
+          output: '',
           executionTimeMs: r.executionTimeMs,
         })));
       },

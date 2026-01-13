@@ -1,23 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock dependencies
+// Mock the API module with exported functions
+const mockGetProblems = vi.fn();
+const mockGetProblem = vi.fn();
+const mockCreateSubmission = vi.fn();
+const mockGetSubmission = vi.fn();
+const mockGetSubmissionHistory = vi.fn();
+
 vi.mock('@/services/api', () => ({
-  api: {
-    getProblems: vi.fn(),
-    getProblem: vi.fn(),
-    submitSolution: vi.fn(),
-    getSubmission: vi.fn(),
-    getSubmissionHistory: vi.fn(),
-  },
+  api: {},
+  getProblems: mockGetProblems,
+  getProblem: mockGetProblem,
+  createSubmission: mockCreateSubmission,
+  getSubmission: mockGetSubmission,
+  getSubmissionHistory: mockGetSubmissionHistory,
 }));
+
+// Mock the WebSocket service
+const mockConnect = vi.fn();
+const mockDisconnect = vi.fn();
+const mockSubscribeToSubmission = vi.fn();
 
 vi.mock('@/services/websocket', () => ({
   websocketService: {
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    subscribeToSubmission: vi.fn(),
-    unsubscribeFromSubmission: vi.fn(),
-    onStatusUpdate: vi.fn(),
+    connect: mockConnect,
+    disconnect: mockDisconnect,
+    subscribeToSubmission: mockSubscribeToSubmission,
   },
 }));
 
@@ -28,23 +36,23 @@ describe('API Service', () => {
 
   describe('getProblems', () => {
     it('should fetch problems list', async () => {
-      const { api } = await import('@/services/api');
+      const { getProblems } = await import('@/services/api');
       const mockProblems = [
         { id: '1', title: 'Two Sum', difficulty: 'easy' },
         { id: '2', title: 'Add Two Numbers', difficulty: 'medium' },
       ];
 
-      (api.getProblems as any).mockResolvedValue(mockProblems);
+      mockGetProblems.mockResolvedValue(mockProblems);
 
-      const result = await api.getProblems();
+      const result = await getProblems();
       expect(result).toEqual(mockProblems);
-      expect(api.getProblems).toHaveBeenCalledTimes(1);
+      expect(mockGetProblems).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('getProblem', () => {
     it('should fetch a single problem by id', async () => {
-      const { api } = await import('@/services/api');
+      const { getProblem } = await import('@/services/api');
       const mockProblem = {
         id: '1',
         title: 'Two Sum',
@@ -52,24 +60,32 @@ describe('API Service', () => {
         description: 'Given an array...',
       };
 
-      (api.getProblem as any).mockResolvedValue(mockProblem);
+      mockGetProblem.mockResolvedValue(mockProblem);
 
-      const result = await api.getProblem('1');
+      const result = await getProblem('1');
       expect(result).toEqual(mockProblem);
-      expect(api.getProblem).toHaveBeenCalledWith('1');
+      expect(mockGetProblem).toHaveBeenCalledWith('1');
     });
   });
 
-  describe('submitSolution', () => {
+  describe('createSubmission', () => {
     it('should submit a solution and return submission id', async () => {
-      const { api } = await import('@/services/api');
+      const { createSubmission } = await import('@/services/api');
       const mockResponse = { submissionId: 'sub-123' };
 
-      (api.submitSolution as any).mockResolvedValue(mockResponse);
+      mockCreateSubmission.mockResolvedValue(mockResponse);
 
-      const result = await api.submitSolution('1', 'print("hello")', 'python');
+      const result = await createSubmission({
+        problemId: '1',
+        code: 'print("hello")',
+        language: 'python',
+      });
       expect(result).toEqual(mockResponse);
-      expect(api.submitSolution).toHaveBeenCalledWith('1', 'print("hello")', 'python');
+      expect(mockCreateSubmission).toHaveBeenCalledWith({
+        problemId: '1',
+        code: 'print("hello")',
+        language: 'python',
+      });
     });
   });
 });
@@ -83,21 +99,14 @@ describe('WebSocket Service', () => {
     const { websocketService } = await import('@/services/websocket');
     
     websocketService.connect();
-    expect(websocketService.connect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 
   it('should subscribe to submission updates', async () => {
     const { websocketService } = await import('@/services/websocket');
+    const callbacks = { onStatus: vi.fn(), onCompleted: vi.fn() };
     
-    websocketService.subscribeToSubmission('sub-123');
-    expect(websocketService.subscribeToSubmission).toHaveBeenCalledWith('sub-123');
-  });
-
-  it('should handle status updates', async () => {
-    const { websocketService } = await import('@/services/websocket');
-    const mockCallback = vi.fn();
-
-    websocketService.onStatusUpdate(mockCallback);
-    expect(websocketService.onStatusUpdate).toHaveBeenCalledWith(mockCallback);
+    websocketService.subscribeToSubmission('sub-123', callbacks);
+    expect(mockSubscribeToSubmission).toHaveBeenCalledWith('sub-123', callbacks);
   });
 });
