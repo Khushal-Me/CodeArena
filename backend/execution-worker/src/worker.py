@@ -52,7 +52,7 @@ logger = get_logger("worker")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/codearena")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
-EXECUTION_TIMEOUT_MS = int(os.getenv("EXECUTION_TIMEOUT_MS", "10000"))
+EXECUTION_TIMEOUT_MS = min(int(os.getenv("EXECUTION_TIMEOUT_MS", "30000")), 30000)
 MAX_MEMORY_MB = int(os.getenv("MAX_MEMORY_MB", "256"))
 
 # Queue configuration (BullMQ format)
