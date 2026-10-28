@@ -62,8 +62,8 @@ class TestExecutor:
 
     def test_timeout_detection(self):
         """Test that timeout is properly detected"""
-        # Timeout should be 10 seconds by default
-        timeout = 10
+        # A runaway submission must be stopped within 30 seconds.
+        timeout = 30
         assert timeout > 0
         assert timeout <= 30  # Max reasonable timeout
 

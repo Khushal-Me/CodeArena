@@ -34,7 +34,7 @@ class ExecutionConfig:
     pids_limit: int = 50
     network_mode: str = "none"
     read_only: bool = True
-    timeout_seconds: int = 10
+    timeout_seconds: int = 30
     tmpfs_size: str = "100m"
 
 
@@ -161,32 +161,70 @@ class DockerManager:
         container: Container, 
         cmd: list, 
         stdin_data: Optional[str] = None,
-        timeout: int = 10
-    ) -> Tuple[int, str, str, int]:
+        timeout: int = 30
+    ) -> Tuple[int, str, str, int, bool]:
         """Run a command in the container and return results."""
         
         start_time = time.time()
+        exec_id = None
         
         try:
-            # Execute command
-            exec_result = container.exec_run(
+            # Start detached so the worker can enforce a wall-clock deadline.
+            exec_id = self.client.api.exec_create(
+                container.id,
                 cmd,
-                stdin=True if stdin_data else False,
-                demux=True,
+                stdin=bool(stdin_data),
                 environment={"HOME": "/tmp"},
             )
-            
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            stdout = exec_result.output[0].decode("utf-8") if exec_result.output[0] else ""
-            stderr = exec_result.output[1].decode("utf-8") if exec_result.output[1] else ""
-            
-            return exec_result.exit_code, stdout, stderr, execution_time_ms
+            exec_id = exec_id["Id"] if isinstance(exec_id, dict) else exec_id
+
+            if stdin_data:
+                # The current callers provide stdin through the shell command.
+                # Keep the argument for API compatibility with existing callers.
+                logger.debug("Command configured with stdin", container_id=container.name)
+
+            self.client.api.exec_start(exec_id, detach=True)
+            deadline = start_time + timeout
+            while True:
+                inspection = self.client.api.exec_inspect(exec_id)
+                if not inspection.get("Running", False):
+                    output = self.client.api.exec_start(
+                        exec_id, socket=False, demux=True
+                    )
+                    stdout = output[0].decode("utf-8") if output and output[0] else ""
+                    stderr = output[1].decode("utf-8") if output and output[1] else ""
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    return (
+                        inspection.get("ExitCode", 1),
+                        stdout,
+                        stderr,
+                        execution_time_ms,
+                        False,
+                    )
+                if time.time() >= deadline:
+                    logger.warning(
+                        "Command timed out",
+                        container_id=container.name,
+                        timeout_seconds=timeout,
+                    )
+                    # Stopping the container kills the running exec. The
+                    # execute() finally block force-removes the container.
+                    try:
+                        container.stop(timeout=1)
+                    except Exception as stop_error:
+                        logger.warning(
+                            "Container stop after timeout failed",
+                            container_id=container.name,
+                            error=str(stop_error),
+                        )
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    return 124, "", "Time Limit Exceeded", execution_time_ms, True
+                time.sleep(0.05)
             
         except Exception as e:
             execution_time_ms = int((time.time() - start_time) * 1000)
             logger.error("Command execution failed", error=str(e))
-            return 1, "", str(e), execution_time_ms
+            return 1, "", str(e), execution_time_ms, False
 
     def execute(
         self, 
@@ -228,12 +266,24 @@ class DockerManager:
             
             # Compile if needed
             if lang_config["compile_cmd"]:
-                exit_code, stdout, stderr, compile_time = self._run_command(
+                exit_code, stdout, stderr, compile_time, compile_timed_out = self._run_command(
                     container, 
                     lang_config["compile_cmd"],
                     timeout=self.config.timeout_seconds
                 )
                 
+                if compile_timed_out:
+                    return ExecutionResult(
+                        success=False,
+                        stdout=stdout,
+                        stderr=stderr,
+                        exit_code=exit_code,
+                        execution_time_ms=compile_time,
+                        memory_used_kb=0,
+                        timed_out=True,
+                        error="Time Limit Exceeded"
+                    )
+
                 if exit_code != 0:
                     return ExecutionResult(
                         success=False,
@@ -252,15 +302,12 @@ class DockerManager:
             if stdin_data:
                 run_cmd = ["sh", "-c", f"echo '{stdin_data}' | {' '.join(run_cmd)}"]
             
-            exit_code, stdout, stderr, execution_time_ms = self._run_command(
+            exit_code, stdout, stderr, execution_time_ms, timed_out = self._run_command(
                 container,
                 run_cmd,
                 stdin_data=stdin_data,
                 timeout=self.config.timeout_seconds
             )
-            
-            # Check for timeout
-            timed_out = (time.time() - start_time) > self.config.timeout_seconds
             
             # Get memory usage (approximate)
             try:
